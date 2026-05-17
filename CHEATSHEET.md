@@ -27,10 +27,10 @@ This document describes how the **intentional** flaws in this project can be exe
 
 ### How the flaw works
 
-User input `q` is inserted directly into the query:
+User input `q` is interpolated **inside** the `prepare()` call:
 
-```sql
-SELECT * FROM creatures WHERE name LIKE '%<q>%'
+```typescript
+db.prepare(`SELECT * FROM creatures WHERE name LIKE '%${q}%'`)
 ```
 
 There is **no** parameterization and **no** escaping. Anything you type in the search box (or send as `q`) becomes part of the SQL string.
@@ -121,13 +121,13 @@ Teaching point: even read-only-looking search boxes can become data exfiltration
 
 ### How the flaw works
 
-The server runs a shell command built from user input:
+The server runs:
 
-```bash
-ping -c 4 <target>
+```typescript
+exec(`ping -c 4 ${host}`, ...)
 ```
 
-`child_process.exec` invokes a shell (`/bin/sh -c …` on Unix). Metacharacters in `target` can chain arbitrary commands.
+(`host` comes from JSON `target` via `runRelayPing()`.) `child_process.exec` invokes a shell (`/bin/sh -c …` on Unix). Metacharacters in `target` can chain arbitrary commands.
 
 Output is returned as JSON `{ stdout, stderr, error }` and rendered in **Raw terminal stream** in the sidebar.
 
@@ -224,17 +224,30 @@ Default code uses `ping -c 4` (Linux/macOS). On Windows, change the route to `pi
 
 ---
 
-## 6. Opengrep (why 0 default findings)
+## 6. Opengrep / SAST
 
-Default Opengrep community scans often report **nothing** on this repo even after `git add`. The flaws are real; the **rules** do not match indirect sinks (`sql` / `command` variables, `better-sqlite3`, Next.js `searchParams` / `request.json()`).
+Vulnerable code uses **textbook sinks** (inline template literals):
 
-Run project rules (expect **3 findings** on `app/api/search` and `app/api/ping`):
+- SQL: `db.prepare(\`SELECT ... '${q}'\`)` in [`app/api/search/route.ts`](app/api/search/route.ts)
+- Shell: `exec(\`ping -c 4 ${host}\`)` in [`app/api/ping/route.ts`](app/api/ping/route.ts)
+
+**Scan results (typical):**
+
+| Command | Lab API findings |
+|---------|------------------|
+| `npm run scan:security` (`.opengrep/galactic-lab.yaml`) | **3–4** (SQLi + CMDi) |
+| `npm run scan:community` (cloned semgrep-rules subset) | **0** (Express/Lambda/mysql sinks) |
+| `opengrep scan --config auto app/api/` | **0** (registry rules still miss Next.js + `better-sqlite3`) |
+
+Students should use **custom lab rules** plus manual review; cloned community packs remain a **false-negative** demo.
 
 ```bash
 npm run scan:security
+npm run scan:community
+npm run scan:all
 ```
 
-See [README.md](README.md) § Static analysis for details.
+See [README.md](README.md) § Static analysis.
 
 ---
 

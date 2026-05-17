@@ -46,36 +46,24 @@ Delete `data/galactic.db` and restart the dev server to re-run the seed.
 
 ## Static analysis (Opengrep)
 
-**Why does default Opengrep report 0 findings?** The app is vulnerable on purpose, but Opengrep community rule packs are tuned for common patterns they miss here:
+Intentional flaws use **direct textbook sinks** (easier to spot in code review):
 
-| Issue | Your code shape | What many rules expect |
-|-------|-----------------|-------------------------|
-| SQLi | `q` → `` const sql = `...${q}` `` → `db.prepare(sql)` | One-step `prepare(\`...${user}\`)` or ORMs (pg, mysql2, Prisma) |
-| CMDi | `target` → `` const command = `ping ... ${target}` `` → `exec(command)` | Direct `exec(userInput)` or obvious `exec("ping " + userInput)` |
+- **SQLi:** `db.prepare(\`SELECT ... '${q}'\`)` — [`app/api/search/route.ts`](app/api/search/route.ts)
+- **CMDi:** `exec(\`ping -c 4 ${host}\`)` — [`app/api/ping/route.ts`](app/api/ping/route.ts)
 
-Taint rules also skip flows through JSON parsing and type guards (`app/api/ping/route.ts`). **Committing the files does not change that** — the rules simply do not model these sinks.
-
-**Lab rules (3 findings on `app/api/` — SQLi + CMDi):**
-
-```bash
-npm run scan:security
-```
-
-**Cloned [semgrep-rules](https://github.com/semgrep/semgrep-rules) subset (0 findings on lab APIs — teaching false negatives):**
+| Scan | Typical result on `app/api/` |
+|------|------------------------------|
+| `npm run scan:security` ([`.opengrep/galactic-lab.yaml`](.opengrep/galactic-lab.yaml)) | **3–4 findings** |
+| `npm run scan:community` ([`.opengrep/community/`](.opengrep/community/)) | **0** (rules target Express/Lambda/mysql, not Next.js + `better-sqlite3`) |
+| `opengrep scan --config auto app/api/` | **0** (same registry gap for this stack) |
 
 ```bash
-npm run scan:community
+npm run scan:security   # lab rules — use in class
+npm run scan:community  # cloned semgrep-rules subset
+npm run scan:all        # both
 ```
 
-Rules copied into [`.opengrep/community/`](.opengrep/community/) (21 YAML files: Node SQLi/CMDi + React XSS). They target Express/Lambda/ORM patterns, not `better-sqlite3` + Next.js `Request`. See [`.opengrep/community/README.md`](.opengrep/community/README.md) for the experiment write-up.
-
-```bash
-npm run scan:all   # custom + cloned community
-```
-
-Custom rules: [`.opengrep/galactic-lab.yaml`](.opengrep/galactic-lab.yaml).
-
-Cursor’s “Basic security” Opengrep scan (~213 registry rules) also tends to show **0** on this repo; use `scan:security` for the intentional vulns.
+See [`.opengrep/community/README.md`](.opengrep/community/README.md) for the detection experiment. Manual payloads: [CHEATSHEET.md](CHEATSHEET.md).
 
 ## Build
 
