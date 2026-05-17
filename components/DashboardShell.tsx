@@ -6,7 +6,8 @@ import type { Creature } from "@/lib/types";
 import { CreatureGrid } from "./CreatureGrid";
 import { PlanetPingTool } from "./PlanetPingTool";
 import { SearchPortal } from "./SearchPortal";
-import { Orbit, ShieldAlert } from "lucide-react";
+import { KeyRound, Orbit, ShieldAlert } from "lucide-react";
+import Link from "next/link";
 
 const QuadrantChart = dynamic(
   () => import("./QuadrantChart").then((mod) => mod.QuadrantChart),
@@ -128,9 +129,18 @@ export default function DashboardShell() {
               operational discretion.
             </p>
           </div>
-          <div className="flex items-center gap-2 rounded-xl border border-orange-500/25 bg-orange-500/10 px-4 py-3 text-xs text-orange-100/90">
-            <ShieldAlert className="size-4 shrink-0 text-orange-400" aria-hidden />
-            <span>Training lattice — synthetic telemetry only.</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <Link
+              href="/admin/login"
+              className="inline-flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-4 py-3 text-xs font-medium text-violet-100/95 transition hover:border-violet-400/50 hover:bg-violet-500/15"
+            >
+              <KeyRound className="size-4 shrink-0 text-violet-300" aria-hidden />
+              Archive console
+            </Link>
+            <div className="flex items-center gap-2 rounded-xl border border-orange-500/25 bg-orange-500/10 px-4 py-3 text-xs text-orange-100/90">
+              <ShieldAlert className="size-4 shrink-0 text-orange-400" aria-hidden />
+              <span>Training lattice — synthetic telemetry only.</span>
+            </div>
           </div>
         </div>
       </header>

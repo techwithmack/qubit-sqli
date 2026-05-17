@@ -128,11 +128,20 @@ function seedIfEmpty(db: Database.Database) {
         ('dr_vex', 'de4b2dfe7295596b4f6dca84d781418a', 'Deep Vault'),
         ('cmd_tess', 'd17e5f43b86e142a4c4ecd80903a9cf7', 'Solar Crown'),
         ('analyst_rio', 'd2832fa0e6986721e038d8e2dfb4f421', 'Signal Gray'),
-        ('xenon_7', '17ea4c9547edb80f4d2b63b686aa991d', 'Specter');
+        ('xenon_7', '17ea4c9547edb80f4d2b63b686aa991d', 'Specter'),
+        ('archivist', 'd0ebde9330af602cbaaf3ca6c9b5d34f', 'Admin');
     `);
   });
 
   insertMany();
+}
+
+function seedAdminIfMissing(db: Database.Database) {
+  const row = db.prepare("SELECT id FROM users WHERE username = 'archivist'").get();
+  if (row) return;
+  db.prepare(
+    `INSERT INTO users (username, password, clearance_level) VALUES ('archivist', 'd0ebde9330af602cbaaf3ca6c9b5d34f', 'Admin')`
+  ).run();
 }
 
 export function getDb(): Database.Database {
@@ -145,6 +154,7 @@ export function getDb(): Database.Database {
   db.pragma("journal_mode = WAL");
   initSchema(db);
   seedIfEmpty(db);
+  seedAdminIfMissing(db);
 
   globalForDb.galacticDb = db;
   return db;

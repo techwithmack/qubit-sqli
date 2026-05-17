@@ -25,6 +25,8 @@ See **[CHEATSHEET.md](CHEATSHEET.md)** for instructor/student payloads (SQLi, co
 | Feature            | Route              | Issue |
 |--------------------|--------------------|--------|
 | Creature search    | `GET /api/search`  | SQL built with string interpolation |
+| Archive console login | `POST /api/admin/login`, UI at `/admin/login` | Auth query built with string interpolation (login bypass) |
+| Admin CRUD (post-auth) | `/admin`, `/api/admin/*` | Parameterized SQL; session cookie only |
 | Planet “ping” tool | `POST /api/ping`   | User input passed to `child_process.exec` |
 | Catalog listing    | `GET /api/creatures` | Uses parameterized queries (safe baseline) |
 
@@ -39,6 +41,7 @@ Passwords are stored as **MD5 hex** for the exercise. Plaintext originals for th
 | `cmd_tess`    | `stellar-ops`               |
 | `analyst_rio` | `deep-core`                 |
 | `xenon_7`     | `xenon-clear`               |
+| `archivist`   | `star-chart-7` (admin console) |
 
 ## Resetting the database
 
@@ -48,12 +51,13 @@ Delete `data/galactic.db` and restart the dev server to re-run the seed.
 
 Intentional flaws use **direct textbook sinks** (easier to spot in code review):
 
-- **SQLi:** `db.prepare(\`SELECT ... '${q}'\`)` — [`app/api/search/route.ts`](app/api/search/route.ts)
+- **SQLi (search):** `db.prepare(\`SELECT ... '${q}'\`)` — [`app/api/search/route.ts`](app/api/search/route.ts)
+- **SQLi (login):** `db.prepare(\`SELECT ... '${username}' ... '${password}'\`)` — [`app/api/admin/login/route.ts`](app/api/admin/login/route.ts)
 - **CMDi:** `exec(\`ping -c 4 ${host}\`)` — [`app/api/ping/route.ts`](app/api/ping/route.ts)
 
 | Scan | Typical result on `app/api/` |
 |------|------------------------------|
-| `npm run scan:security` ([`.opengrep/galactic-lab.yaml`](.opengrep/galactic-lab.yaml)) | **3–4 findings** |
+| `npm run scan:security` ([`.opengrep/galactic-lab.yaml`](.opengrep/galactic-lab.yaml)) | **4–5 findings** |
 | `npm run scan:community` ([`.opengrep/community/`](.opengrep/community/)) | **0** (rules target Express/Lambda/mysql, not Next.js + `better-sqlite3`) |
 | `opengrep scan --config auto app/api/` | **0** (same registry gap for this stack) |
 
