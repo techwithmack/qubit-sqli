@@ -224,7 +224,21 @@ Default code uses `ping -c 4` (Linux/macOS). On Windows, change the route to `pi
 
 ---
 
-## 6. Seeded credentials (post-exfiltration)
+## 6. Opengrep (why 0 default findings)
+
+Default Opengrep community scans often report **nothing** on this repo even after `git add`. The flaws are real; the **rules** do not match indirect sinks (`sql` / `command` variables, `better-sqlite3`, Next.js `searchParams` / `request.json()`).
+
+Run project rules (expect **3 findings** on `app/api/search` and `app/api/ping`):
+
+```bash
+npm run scan:security
+```
+
+See [README.md](README.md) § Static analysis for details.
+
+---
+
+## 7. Seeded credentials (post-exfiltration)
 
 After UNION, students can verify MD5 hashes:
 

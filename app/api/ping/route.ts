@@ -4,9 +4,28 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 /**
- * INTENTIONALLY VULNERABLE (training lab): shell command built from user input.
+ * INTENTIONALLY VULNERABLE (training lab): user input interpolated into shell command.
  * Do not copy this pattern into production software.
  */
+function runRelayPing(host: string): Promise<NextResponse> {
+  return new Promise<NextResponse>((resolve) => {
+    // FLAW: textbook command injection — template literal passed straight to exec().
+    exec(
+      `ping -c 4 ${host}`,
+      { timeout: 15_000, maxBuffer: 1024 * 1024 },
+      (err, stdout, stderr) => {
+        resolve(
+          NextResponse.json({
+            stdout: stdout ?? "",
+            stderr: stderr ?? "",
+            error: err ? err.message : undefined,
+          })
+        );
+      }
+    );
+  });
+}
+
 export async function POST(request: Request) {
   let body: unknown;
   try {
@@ -30,22 +49,5 @@ export async function POST(request: Request) {
     );
   }
 
-  // FLAW: unsanitized interpolation into shell — command injection surface.
-  const command = `ping -c 4 ${target}`;
-
-  return new Promise<NextResponse>((resolve) => {
-    exec(
-      command,
-      { timeout: 15_000, maxBuffer: 1024 * 1024 },
-      (err, stdout, stderr) => {
-        resolve(
-          NextResponse.json({
-            stdout: stdout ?? "",
-            stderr: stderr ?? "",
-            error: err ? err.message : undefined,
-          })
-        );
-      }
-    );
-  });
+  return runRelayPing(target);
 }

@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "scan:security": "opengrep scan --config .opengrep/galactic-lab.yaml",
+    "scan:community": "opengrep scan --config .opengrep/community",
+    "scan:all": "opengrep scan --config .opengrep/galactic-lab.yaml --config .opengrep/community"
   },
   "dependencies": {
     "better-sqlite3": "^12.9.0",
