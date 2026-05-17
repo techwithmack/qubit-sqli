@@ -1,26 +1,49 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg-deep: #070512;
+  --neon-cyan: #22d3ee;
+  --neon-orange: #fb923c;
+  --neon-violet: #8b5cf6;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+body {
+  min-height: 100%;
+  background: radial-gradient(
+      ellipse 120% 80% at 50% -20%,
+      color-mix(in oklab, var(--neon-violet) 35%, transparent),
+      transparent
+    ),
+    linear-gradient(
+      165deg,
+      #05030f 0%,
+      #12081f 40%,
+      #0a1628 100%
+    );
+  color: #e2e8f0;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+.glass {
+  background: color-mix(in oklab, white 6%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid color-mix(in oklab, white 12%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--neon-cyan) 15%, transparent),
+    0 0 48px color-mix(in oklab, var(--neon-violet) 20%, transparent),
+    inset 0 1px 0 color-mix(in oklab, white 8%, transparent);
+}
+
+.glow-cyan {
+  text-shadow: 0 0 24px color-mix(in oklab, var(--neon-cyan) 60%, transparent);
+}
+
+.glow-orange {
+  box-shadow: 0 0 32px color-mix(in oklab, var(--neon-orange) 35%, transparent);
 }
