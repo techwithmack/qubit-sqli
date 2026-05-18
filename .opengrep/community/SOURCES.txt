@@ -1,0 +1,23 @@
+# Upstream: https://github.com/semgrep/semgrep-rules
+# Branch: develop
+# Snapshot commit (when copied):
+
+b29bee1e82ab35d5f6dfe5b2594a9959567b6143
+
+Copied paths:
+  javascript/lang/security/detect-child-process.yaml
+  javascript/lang/security/audit/sqli/node-knex-sqli.yaml
+  javascript/lang/security/audit/sqli/node-mssql-sqli.yaml
+  javascript/lang/security/audit/sqli/node-mysql-sqli.yaml
+  javascript/lang/security/audit/sqli/node-postgres-sqli.yaml
+  javascript/aws-lambda/security/tainted-sql-string.yaml
+  javascript/aws-lambda/security/detect-child-process.yaml
+  javascript/aws-lambda/security/knex-sqli.yaml
+  javascript/aws-lambda/security/mysql-sqli.yaml
+  javascript/aws-lambda/security/pg-sqli.yaml
+  javascript/aws-lambda/security/sequelize-sqli.yaml
+  javascript/shelljs/security/shelljs-exec-injection.yaml
+  typescript/react/security/audit/*.yaml
+  typescript/react/security/react-insecure-request.yaml
+  typescript/react/security/react-markdown-insecure-html.yaml
+  typescript/lang/security/audit/cors-regex-wildcard.yaml

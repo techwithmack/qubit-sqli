@@ -1,0 +1,92 @@
+# Custom Opengrep rules for The Galactic Bestiary training lab.
+# Targets Next.js Route Handlers + better-sqlite3 + child_process.exec.
+# Run: opengrep scan --config .opengrep/galactic-lab.yaml
+
+rules:
+  - id: galactic-sqli-search-param-to-prepare
+    languages:
+      - typescript
+    severity: ERROR
+    message: >-
+      SQL query built with string interpolation from request input, then passed
+      to db.prepare(). Use parameterized queries (bound parameters), not template
+      literals. Lab surface: GET /api/search.
+    metadata:
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A03:2021 – Injection"
+      category: security
+      technology:
+        - nextjs
+        - sqlite
+    mode: taint
+    pattern-sources:
+      - pattern: request.nextUrl.searchParams.get($ARG)
+    pattern-sinks:
+      - pattern: $DB.prepare($SQL)
+
+  - id: galactic-sqli-inline-prepare-template
+    languages:
+      - typescript
+    severity: WARNING
+    message: >-
+      User-controlled value interpolated inside SQL passed to db.prepare().
+      Lab: app/api/search/route.ts.
+    metadata:
+      cwe: "CWE-89"
+      category: security
+    patterns:
+      - pattern: |
+          $DB.prepare(`...${$X}...`)
+
+  - id: galactic-sqli-admin-login-inline
+    languages:
+      - typescript
+    severity: ERROR
+    message: >-
+      Authentication query built with interpolated username/password passed to
+      db.prepare(). Use bound parameters and verify passwords in application code.
+      Lab surface: POST /api/admin/login.
+    metadata:
+      cwe: "CWE-89: SQL Injection"
+      owasp: "A03:2021 – Injection"
+      category: security
+      technology:
+        - nextjs
+        - sqlite
+    patterns:
+      - pattern: |
+          $DB.prepare(`SELECT * FROM users WHERE username = '${$USER}' AND password = '${$PASS}'`)
+
+  - id: galactic-cmdi-exec-inline-ping-template
+    languages:
+      - typescript
+    severity: ERROR
+    message: >-
+      Shell command built with interpolated input passed to child_process.exec().
+      Use spawn/execFile with a fixed argv array and validated host. Lab surface:
+      POST /api/ping.
+    metadata:
+      cwe: "CWE-78: OS Command Injection"
+      owasp: "A03:2021 – Injection"
+      category: security
+    patterns:
+      - pattern: exec(`ping -c 4 ${$TARGET}`, ...)
+
+  - id: galactic-cmdi-relay-param-to-exec
+    languages:
+      - typescript
+    severity: ERROR
+    message: >-
+      Relay ping helper passes function parameter into exec() template literal.
+      Lab surface: POST /api/ping (target field).
+    metadata:
+      cwe: "CWE-78"
+      category: security
+    mode: taint
+    pattern-sources:
+      - pattern: |
+          (body as $T).target
+      - pattern: |
+          ($BODY as { target?: unknown }).target
+    pattern-sinks:
+      - pattern: exec(`ping -c 4 ${$HOST}`, ...)
